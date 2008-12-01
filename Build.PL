@@ -11,7 +11,7 @@ Module::Build->new
       dynamic_config  => 0,
       requires        => 	{
 							'perl'		=> '5.6.1',
-							'Mail::Log::Exceptions'	=> 0,
+							'Mail::Log::Exceptions'	=> 1.0100,
 							'Mail::Log::Parse::Postfix' => 1.002,
 							'Scalar::Util'	=> 0,
 							},

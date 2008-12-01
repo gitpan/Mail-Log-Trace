@@ -1,6 +1,6 @@
 ---
 name: Mail-Log-Trace
-version: 1.00.00
+version: 1.0001
 author:
   - 'Daniel Staal - <DStaal@usa.net>'
 abstract: Traces a message through the mailsystem.
@@ -8,7 +8,7 @@ license: perl
 resources:
   license: http://dev.perl.org/licenses/
 requires:
-  Mail::Log::Exceptions: 0
+  Mail::Log::Exceptions: 1.01
   Mail::Log::Parse::Postfix: 1.002
   Scalar::Util: 0
   perl: 5.6.1
@@ -22,7 +22,7 @@ dynamic_config: 0
 provides:
   Mail::Log::Trace:
     file: lib/Mail/Log/Trace.pm
-    version: 1.00.00
+    version: 1.0001
   Mail::Log::Trace::Postfix:
     file: lib/Mail/Log/Trace/Postfix.pm
     version: 1.0

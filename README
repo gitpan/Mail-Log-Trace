@@ -211,6 +211,8 @@ REQUIRES
     Some subclass, and probably a Mail::Log::Parse class to be useful.
 
 HISTORY
+    1.00.01 Dec 1, 2008 - Requirements fix, no code changes.
+
     1.00.00 Nov 28, 2008 - original version.
 
 AUTHOR

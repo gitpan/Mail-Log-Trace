@@ -62,7 +62,7 @@ use base qw(Exporter);
 BEGIN {
     use Exporter ();
     use vars qw($VERSION @EXPORT @EXPORT_OK %EXPORT_TAGS);
-    $VERSION     = '1.00.00';
+    $VERSION     = '1.0001';
     #Give a hoot don't pollute, do not export more than needed by default
     @EXPORT      = qw();
     @EXPORT_OK   = qw();
@@ -692,6 +692,8 @@ L<Scalar::Util>, L<Mail::Log::Exceptions>.
 Some subclass, and probably a L<Mail::Log::Parse> class to be useful.
 
 =head1 HISTORY
+
+1.00.01 Dec 1, 2008 - Requirements fix, no code changes.
 
 1.00.00 Nov 28, 2008
     - original version.
