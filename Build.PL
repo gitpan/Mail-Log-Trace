@@ -12,7 +12,7 @@ Module::Build->new
       requires        => 	{
 							'perl'		=> '5.6.1',
 							'Mail::Log::Exceptions'	=> 1.0100,
-							'Mail::Log::Parse::Postfix' => 1.002,
+							'Mail::Log::Parse::Postfix' => 1.04,
 							'Scalar::Util'	=> 0,
 							},
       build_requires  =>	{

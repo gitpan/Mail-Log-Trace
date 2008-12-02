@@ -38,7 +38,7 @@ USAGE
 
     The string coersion is overloaded to return the class name, and the file
     we are working with. Boolean currently checks to see if we were able to
-    open the file. (Which is kinda silly, as we'd through an error if we
+    open the file. (Which is kinda silly, as we'd throw an error if we
     couldn't.)
 
     All times are expected to be in Unix epoc-time format.
@@ -211,6 +211,8 @@ REQUIRES
     Some subclass, and probably a Mail::Log::Parse class to be useful.
 
 HISTORY
+    1.00.02 Dec 2, 2008 - I really mean it this time.
+
     1.00.01 Dec 1, 2008 - Requirements fix, no code changes.
 
     1.00.00 Nov 28, 2008 - original version.

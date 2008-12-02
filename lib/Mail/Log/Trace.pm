@@ -47,7 +47,7 @@ This is a an object-orientend module, with specific methods documented below.
 
 The string coersion is overloaded to return the class name, and the file
 we are working with.  Boolean currently checks to see if we were able to
-open the file.  (Which is kinda silly, as we'd through an error if we couldn't.)
+open the file.  (Which is kinda silly, as we'd throw an error if we couldn't.)
 
 All times are expected to be in Unix epoc-time format.
 
@@ -56,13 +56,13 @@ All times are expected to be in Unix epoc-time format.
 use strict;
 use warnings;
 use Scalar::Util qw(refaddr blessed reftype);
-use Mail::Log::Exceptions;
+use Mail::Log::Exceptions 1.0100;
 use base qw(Exporter);
 
 BEGIN {
     use Exporter ();
     use vars qw($VERSION @EXPORT @EXPORT_OK %EXPORT_TAGS);
-    $VERSION     = '1.0001';
+    $VERSION     = '1.0002';
     #Give a hoot don't pollute, do not export more than needed by default
     @EXPORT      = qw();
     @EXPORT_OK   = qw();
@@ -692,6 +692,8 @@ L<Scalar::Util>, L<Mail::Log::Exceptions>.
 Some subclass, and probably a L<Mail::Log::Parse> class to be useful.
 
 =head1 HISTORY
+
+1.00.02 Dec 2, 2008 - I really mean it this time.
 
 1.00.01 Dec 1, 2008 - Requirements fix, no code changes.
 
