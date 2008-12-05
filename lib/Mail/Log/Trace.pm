@@ -62,7 +62,7 @@ use base qw(Exporter);
 BEGIN {
     use Exporter ();
     use vars qw($VERSION @EXPORT @EXPORT_OK %EXPORT_TAGS);
-    $VERSION     = '1.0002';
+    $VERSION     = '1.0003';
     #Give a hoot don't pollute, do not export more than needed by default
     @EXPORT      = qw();
     @EXPORT_OK   = qw();
@@ -693,6 +693,8 @@ Some subclass, and probably a L<Mail::Log::Parse> class to be useful.
 
 =head1 HISTORY
 
+1.00.03 Dec 5, 2208 - Licence clarification.
+
 1.00.02 Dec 2, 2008 - I really mean it this time.
 
 1.00.01 Dec 1, 2008 - Requirements fix, no code changes.
@@ -711,8 +713,8 @@ Some subclass, and probably a L<Mail::Log::Parse> class to be useful.
 This program is free software; you can redistribute
 it and/or modify it under the same terms as Perl itself.
 
-This licence will expire in 30 years, or five years after the author's death,
-whichever occurs last.
+This copyright will expire in 30 years, or five years after the author's death,
+whichever occurs last, at which time the code be released to the public domain.
 
 =cut
 

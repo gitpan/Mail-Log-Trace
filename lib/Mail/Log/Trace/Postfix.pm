@@ -44,7 +44,7 @@ use constant EMPTY_STRING => qw{};
 BEGIN {
     use Exporter ();
     use vars qw($VERSION @EXPORT @EXPORT_OK %EXPORT_TAGS);
-    $VERSION     = '1.0';
+    $VERSION     = '1.0001';
 }
 
 #
@@ -473,6 +473,8 @@ runtime.  However, it is assumed to behave exactly like Mail::Log::Parse::Postfi
 
 =head1 HISTORY
 
+1.0.1 Dec 5, 2008 - Licence clarification.
+
 1.0 Nov 28, 2008.
     - original version.
 
@@ -487,8 +489,8 @@ runtime.  However, it is assumed to behave exactly like Mail::Log::Parse::Postfi
 This program is free software; you can redistribute
 it and/or modify it under the same terms as Perl itself.
 
-This licence will expire in 30 years, or five years after the author's death,
-whichever occurs last.
+This copyright will expire in 30 years, or five years after the author's death,
+whichever occurs last, at which time the code will be released to the public domain.
 
 =head1 SEE ALSO
 
