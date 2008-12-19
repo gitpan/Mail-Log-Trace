@@ -51,50 +51,14 @@ BEGIN {
 # Define class variables.  Note that they are hashes...
 #
 
-my %message_info;
-my %log_info;
-
-#
-# DESTROY class variables.
-#
-
-### IF NOT DONE THERE IS A MEMORY LEAK.  ###
-
-sub DESTROY {
-	my ($self) = @_;
-	
-	delete $message_info{refaddr $self};
-	delete $log_info{refaddr $self};
-	
-	$self->SUPER::DESTROY();
-	
-	return;
-}
-
 =head3 set_connection_id
 
 Sets the connection id of the message we are looking for.
-
-=cut
-
-sub set_connection_id {
-	my ($self, $new_id) = @_;
-	$message_info{refaddr $self}{'connection_id'} = $new_id;
-	return;
-}
 
 =head3 set_process_id
 
 Sets the process id of the message we are looking for.  (Note that pids are
 often reused, and Postfix will use several processes for a specific message.)
-
-=cut
-
-sub set_process_id {
-	my ($self, $new_id) = @_;
-	$message_info{refaddr $self}{'process_id'} = $new_id;
-	return;
-}
 
 =head3 set_status
 
@@ -102,33 +66,11 @@ Sets the status id of the message we are looking for.
 
 Currently this is the B<full> status, not just the numeric code.
 
-=cut
-
-sub set_status {
-	my ($self, $new_id) = @_;
-	$message_info{refaddr $self}{'status'} = $new_id;
-	return;
-}
-
 =head3 set_year
 
 Sets the year the logfile was written in, since Postfix doesn't log that.
 
 Assumes the current year if not set.  (See L<Mail::Log::Parse::Postfix>.)
-
-=cut
-
-sub set_year {
-	my ($self, $year) = @_;
-	$log_info{refaddr $self}{year} = $year;
-	
-	# If we've already opened the log file, set the year in the log file.
-	my $maillog = $self->_get_log_parser();
-	if (defined($maillog)) {
-		$maillog->set_year($year);
-	}
-	return;
-}
 
 =head2 GETTERS
 
@@ -136,29 +78,12 @@ sub set_year {
 
 Returns the connection id of the message we are looking for/have found.
 
-=cut
-
-#
-# Getters.
-#
-sub get_connection_id {
-	my ($self) = @_;
-	return $message_info{refaddr $self}{'connection_id'};
-}
-
 =head3 get_process_id
 
 Returns the process id of the message we are looking for/have found.
 
 This will be the process id of the first part of the message found, which may
 or may not be the first entry of the message in the log.
-
-=cut
-
-sub get_process_id {
-	my ($self) = @_;
-	return $message_info{refaddr $self}{'process_id'};
-}
 
 =head3 get_status
 
@@ -168,27 +93,33 @@ Currently this is the B<full> status, not just the numeric code.
 
 =cut
 
-sub get_status {
-	my ($self, $new_id) = @_;
-	return $message_info{refaddr $self}{'status'};
-}
-
 #
 # Overridden methods.
 #
 
-sub clear_message_info {
-	my ($self) = @_;
-
-	# Call the super, to clear out it's info:
-	$self->SUPER::clear_message_info();
-
-	$self->set_connection_id(undef);
-	$self->set_process_id(undef);
-	$self->set_status(undef);
-
-	return;
+sub _requested_public_accessors {
+	return qw(connection_id process_id status);
 }
+
+sub _requested_cleared_parameters {
+	return qw(connection_id process_id status);
+}
+
+sub _set_as_message_info { 
+	return qw(connection_id process_id status);
+};
+
+sub _requested_special_accessors { 
+	return ( year => sub {	my ($self, $year) = @_;
+							return '____INVALID__VALUE____' if $year < 1970;
+							my $maillog = $self->_get_log_parser();
+							if (defined($maillog)) {
+								$maillog->set_year($year);
+							}
+							return $year;
+						 },
+			);
+};
 
 sub find_message {
 	my ($self, $argref) = @_;
@@ -203,8 +134,8 @@ sub find_message {
 		$parser_class = defined($parser_class) ? $parser_class : 'Mail::Log::Parse::Postfix';
 		eval "require $parser_class;";
 		
-		if ( defined($log_info{refaddr $self}{year}) ) {
-			$maillog = eval "$parser_class->new({log_file => \$self->get_log(), year => \$log_info{refaddr \$self}{year}});";
+		if ( defined($self->get_year()) ) {
+			$maillog = eval "$parser_class->new({log_file => \$self->get_log(), year => \$self->get_year()});";
 		}
 		else {
 			$maillog = eval "$parser_class->new({log_file => \$self->get_log(),});";
@@ -339,46 +270,6 @@ sub find_message_info {
 ####
 
 #
-#	parse_agrs: Parses an argument hashref.  Object method.
-#
-# Takes the hashref that is passed to a meathod, and parses it for possible entries.
-# Configures the current object with the arguments, and also passes back a hashref with them inside.
-# Optionally, it will throw an exception if there are no arguments passed and the current object is blank.
-#
-# Arguments: Positional, the hashref to parse, and a boolean of whether to throw an error.
-#
-# Return value: A hashref with keys for all possible arguements.
-#
-sub _parse_args {
-	my ($self, $argref, $throw_error) = @_;
-
-	my $args;
-	eval { $args = $self->SUPER::_parse_args($argref, $throw_error); };
-
-	my $exception = Mail::Log::Exceptions->caught();
-
-	# Get Postfix-specific data.
-	$self->set_connection_id($argref->{'connection_id'})	if defined $argref->{'connection_id'};
-	$self->set_status($argref->{'status'})					if defined $argref->{'status'};
-	$self->set_process_id($argref->{'process_id'})			if defined $argref->{'process_id'};
-	$self->set_year($argref->{year})						if defined $argref->{year};
-
-	# Speed things up a bit, and make it easier to read.
-	$args->{connection_id}	= $self->get_connection_id();
-	$args->{status}			= $self->get_status();
-	$args->{process_id}		= $self->get_process_id();
-
-	if ( $throw_error and defined($exception) ) {
-		# If none are defined...  (This is actually slightly redundant, but fast.)
-		if ( !(grep { defined($args->{$_}) } keys %{$args}) ) {
-			$exception->rethrow();
-		}
-	}
-
-	return $args;
-}
-
-#
 #	line_matches: Finds whether a line matches the given info.  Function.
 #
 # Takes a hashref to match against (as returned from Mail::Log::Parse::Postfix)
@@ -445,7 +336,7 @@ sub _read_data_from_line {
 	$self->add_to_address($_) foreach (@{$line_data->{to}});
 	$self->set_from_address($line_data->{from}) unless defined($self->get_from_address());
 	$self->set_message_id($line_data->{msgid}) unless defined($self->get_message_id());
-	$self->set_relay_host($line_data->{relay}) unless defined($self->get_relay_host());
+	$self->set_relay($line_data->{relay}) unless defined($self->get_relay());
 	$self->set_status($line_data->{status}) unless defined($self->get_status());
 	$self->set_connection_id($line_data->{id}) unless defined($self->get_connection_id());
 	$self->_set_delay($line_data->{delay}) if defined($line_data->{delay});

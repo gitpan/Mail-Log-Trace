@@ -62,7 +62,7 @@ use base qw(Exporter);
 BEGIN {
     use Exporter ();
     use vars qw($VERSION @EXPORT @EXPORT_OK %EXPORT_TAGS);
-    $VERSION     = '1.0003';
+    $VERSION     = '1.0100_1';
     #Give a hoot don't pollute, do not export more than needed by default
     @EXPORT      = qw();
     @EXPORT_OK   = qw();
@@ -77,6 +77,27 @@ my %message_info;
 my %log_info;
 my %message_raw_info;
 
+# Accessors.
+my %public = (	from_address	=> undef,
+				message_id		=> undef,
+				recieved_time	=> undef,
+				sent_time		=> undef,
+				relay			=> undef,
+				subject			=> undef,
+			);
+my %public_set_only = ();
+my %public_get_only = ( connect_time => undef, disconnect_time => undef, delay => undef );
+my %array_accessors = ( to_address => undef );
+my @valid_parameters;
+my @checked_parameters = qw(from_address message_id	recieved_time sent_time	relay
+							subject to_address);
+my %all_setters;
+my %all_getters;
+
+my @cleared_parameters = qw(from_address message_id recieved_time sent_time
+							relay to_address subject connect_time disconnect_time
+							delay);
+
 #
 # DESTROY class variables.
 #
@@ -85,9 +106,11 @@ my %message_raw_info;
 sub DESTROY {
 	my ($self) = @_;
 	
-	delete $message_info{refaddr $self};
-	delete $log_info{refaddr $self};
-	delete $message_raw_info{refaddr $self};
+	delete $message_info{$$self};
+	delete $log_info{$$self};
+	delete $message_raw_info{$$self};
+	delete $all_setters{$$self};
+	delete $all_getters{$$self};
 	
 	return;
 }
@@ -101,12 +124,12 @@ use overload (
 	qw{""} => sub { my ($self) = @_;
 					return  blessed($self)
 							.' File: '
-							.$log_info{refaddr $self}{'filename'};
+							.$log_info{$$self}{'filename'};
 					},
 	
 	# Boolean overloads to if we are usable.  (Have a filehandle.)
 	qw{bool} => sub { my ($self) = @_;
-						return defined($log_info{refaddr $self}{'log_parser'});
+						return defined($log_info{$$self}{'log_parser'});
 					},
 	
 	# Numeric context just doesn't mean anything.  Throw an error.
@@ -138,15 +161,197 @@ sub new
     my ($class, $parameters_ref) = @_;
 
     my $self = bless \do{my $anon}, $class;
+	$$self = refaddr $self;
+
+	# Build accessors
+	
+	# Get stuff from the any base classes.
+	my @public = $self->_requested_public_accessors();
+	my %public_special = $self->_requested_special_accessors();
+	my @public_set_only = $self->_requested_public_set_only();
+	my @public_get_only = $self->_requested_public_get_only();
+	my @array = $self->_requested_array_accessors();
+	
+	@checked_parameters = ($self->_set_as_message_info(), @checked_parameters);
+	my %checked_parameters = map { $_ => undef if $_ ne ''; } @checked_parameters;
+	@checked_parameters = keys %checked_parameters;
+
+	foreach my $item ( @public ) {
+		$public{$item} = undef;
+	}
+	foreach my $item ( @public_set_only ) {
+		$public_set_only{$item} = undef;
+	}
+	foreach my $item ( @public_get_only ) {
+		$public_get_only{$item} = undef;
+	}
+	foreach my $item ( @array ) {
+		$array_accessors{$item} = undef;
+	}
+	
+	# Setters first.
+	my %merged_hash = (%public, %public_set_only, %public_special);
+	while ( my ($accessor, $action) = each %merged_hash ) {
+		$all_setters{$$self}{$accessor} = $self->_build_setter($accessor, 0, $action);
+		push @valid_parameters, $accessor;
+	}
+	
+	# Now getters.
+	foreach my $accessor ( keys %public, keys %public_get_only, keys %public_special ) {
+		$all_getters{$$self}{$accessor} = $self->_build_getter($accessor);
+	}
+
+	# Now build the private.
+	$all_setters{$$self}{$_} = $self->_build_setter($_, 1) foreach ( keys %public_get_only );
+	$all_getters{$$self}{$_} = $self->_build_getter($_, 1) foreach ( keys %public_set_only );
+
+	# And the complex...
+	$self->_build_array_accessors($_) foreach ( keys %array_accessors );
+	push @valid_parameters, keys %array_accessors;
+
+	# Get the list of parameters to clear when 'clear' is called.
+	my @requested_cleared = $self->_requested_cleared_parameters();
+	@requested_cleared = grep { defined($_) } @requested_cleared;
+	push @cleared_parameters, @requested_cleared;
 
 	# Set up any/all passed parameters.
-	# (Only does message info.)
+	# (Only does message info.  Note this can only be called after the above!)
 	$self->_parse_args($parameters_ref, 0);
 
 	# Log info.
 	$self->set_log($parameters_ref->{'log_file'});  # Better to keep validation together.
 
     return $self;
+}
+
+#
+# The method factories.
+#
+
+sub _build_setter {
+	my ($self, $attribute, $private, $action) = @_;
+	
+	# Build the correct name.
+	my $sub_name = "set_$attribute";
+	$sub_name = "_$sub_name" if $private;
+	
+	# The typeglob below sets off all kinds of warnings.
+	# (The 'redefine' is because this happens for _every_object_.)
+	no strict 'refs';
+	no warnings qw(redefine);
+	
+	# Build the actual subroutine.
+	if ( defined($action) ) {
+		# If we do processing or validation, give it a chance to happen.
+		return *$sub_name = sub {
+			use strict 'refs';
+			my ($self, $new_id) = @_;
+			
+			# True if they accept the value, false otherwise.
+			# (To make validation easier.)
+			$new_id = $action->($self, $new_id);
+			if ( $new_id ne '____INVALID__VALUE____' ) {
+				$message_info{$$self}{$attribute} = $new_id;
+			}
+			else {
+				# If they don't accept the value, tell the user.
+				Mail::Log::Exceptions::InvalidParameter->throw("'$new_id' is not a valid value for $attribute.\n");
+			}
+			return;
+		}
+	}
+	else {
+		# For basic setters, use a speed-optimized version.
+		return *$sub_name = sub {
+			$message_info{${$_[0]}}{$attribute} = $_[1];
+			return;
+		}
+	}
+}
+
+sub _build_getter {
+	my ($self, $attribute, $private) = @_;
+
+	# Build the correct name.
+	my $sub_name = "get_$attribute";
+	$sub_name = "_$sub_name" if $private;
+
+	# The typeglob below sets off all kinds of warnings.
+	# (The 'redefine' is because this happens for _every_object_.)
+	no strict 'refs';
+	no warnings qw(redefine);
+
+	# Build the actual subroutine. (As fast as we can make it.)
+	return *$sub_name = sub {
+		return $message_info{${$_[0]}}{$attribute};
+	}
+}
+
+sub _build_array_accessors {
+	my ($self, $attribute, $private) = @_;
+
+	my $get_name = "get_$attribute";
+	my $set_name = "set_$attribute";
+	my $add_name = "add_$attribute";
+	my $remove_name = "remove_$attribute";
+
+	if ( $private ) {
+		foreach my $name ( ($get_name, $set_name, $add_name, $remove_name) ) {
+			$name = "_$name";
+		}
+	}
+
+	no strict 'refs';
+	no warnings qw(redefine);
+
+	*$get_name = sub {
+		return $message_info{${$_[0]}}{$attribute};
+	};
+	$all_getters{$$self}{$attribute} = *$get_name;
+
+	# Note that strict refs still aren't in effect.
+	# Needed for the call to $add_name below.
+	*$set_name = sub {
+		my ($self, $new_id) = @_;
+		if (defined($new_id) ) {
+			@{$message_info{$$self}{$attribute}} = ();
+			$add_name->($self, $new_id);
+		}
+		else {
+			$message_info{$$self}->{$attribute} = undef;
+		}
+		return;
+	};
+	$all_setters{$$self}{$attribute} = *$set_name;
+
+	*$add_name = sub {
+		use strict 'refs';
+		my ($self, $new_id) = @_;
+		
+		# If we are given a single element, and we haven't seen it before,
+		# add it to the array.
+		if ( !defined(reftype($new_id)) ) {
+			unless ( grep { $_ eq $new_id } @{$message_info{$$self}{$attribute}} ) {
+				push @{$message_info{$$self}{$attribute}}, ($new_id);
+			}
+		}
+		# If we are given an array of elements, merge it with our current array.
+		elsif ( reftype($new_id) eq 'ARRAY' ) {
+			my %temp_hash;
+			foreach my $element (@{$message_info{$$self}{$attribute}}, @{$new_id}) {
+				$temp_hash{$element} = undef;
+			}
+			@{$message_info{$$self}{$attribute}} = keys %temp_hash;
+		}
+		return;
+	};
+
+	*$remove_name = sub {
+		my ($self, $id) = @_;
+		@{$message_info{$$self}{$attribute}}
+			= grep { $_ ne $id } @{$message_info{$$self}{$attribute}};
+		return;
+	};
 }
 
 #
@@ -159,53 +364,21 @@ sub new
 
 Sets the from address of the message we are looking for.
 
-=cut
-
-sub set_from_address {
-	my ($self, $new_address) = @_;
-	$message_info{refaddr $self}{'from_address'} = $new_address;
-	return;
-}
-
 =head3 set_message_id
 
 Sets the message_id of the message we are looking for.
 (Check with the specific parser class for what that means in a particular
 log format.)
 
-=cut
-
-sub set_message_id {
-	my ($self, $new_id) = @_;
-	$message_info{refaddr $self}{'message_id'} = $new_id;
-	return;
-}
-
 =head3 set_recieved_time
 
 Sets the recieved time of the message we are looking for.
 (The time this machine got the message.)
 
-=cut
-
-sub set_recieved_time {
-	my ($self, $new_id) = @_;
-	$message_info{refaddr $self}{'recieved_time'} = $new_id;
-	return;
-}
-
 =head3 set_sent_time
 
 Sets the sent time of the message we are looking for.
 (The time this machine sent the message.)
-
-=cut
-
-sub set_sent_time {
-	my ($self, $new_id) = @_;
-	$message_info{refaddr $self}{'sent_time'} = $new_id;
-	return;
-}
 
 =head3 set_relay_host
 
@@ -213,25 +386,9 @@ Sets the relay host of the message we are looking for.  Commonly either
 the relay we recieved it from, or the relay we sent it to.  (Depending
 on the logfile.)
 
-=cut
-
-sub set_relay_host {
-	my ($self, $new_id) = @_;
-	$message_info{refaddr $self}{'relay'} = $new_id;
-	return;
-}
-
 =head3 set_subject
 
 Sets the subject of the message we are looking for.
-
-=cut
-
-sub set_subject {
-	my ($self, $new_id) = @_;
-	$message_info{refaddr $self}{subject} = $new_id;
-	return;
-}
 
 =head3 set_parser_class
 
@@ -250,7 +407,7 @@ with Mail::Log::Parse.
 sub set_parser_class {
 	my ($self, $new_id) = @_;
 	if ( $new_id =~ /Mail::Log::Parse::/ ) {
-		$log_info{refaddr $self}{parser_class} = $new_id;
+		$log_info{$$self}{parser_class} = $new_id;
 	}
 	else {
 		Mail::Log::Exceptions::InvalidParameter->throw('Parser class needs to be a Mail::Log::Parse:: subclass.');
@@ -305,21 +462,6 @@ address will be in the final array.
 
 As a special case, passing C<undef> to this will set the array to undef.
 
-=cut
-
-# 'to' is a little special: it can have multiple values.
-sub set_to_address {
-	my ($self, $new_address) = @_;
-	if (defined($new_address) ) {
-		@{$message_info{refaddr $self}{'to_address'}} = ();
-		$self->add_to_address($new_address);
-	}
-	else {
-		$message_info{refaddr $self}->{to_address} = undef;
-	}
-	return;
-}
-
 =head3 add_to_address
 
 Adds to the list of to addresses we are looking for.  It does I<not> delete the
@@ -328,41 +470,11 @@ array first.
 Duplicates will be consolidated, so that the array will only have one of any
 given address.  (No matter the order they are given in.)
 
-=cut
-
-sub add_to_address {
-	my ($self, $new_address) = @_;
-	
-	# If we are given a single address, and we haven't seen it before,
-	# add it to the array.
-	if ( !defined(reftype($new_address)) ) {
-		unless ( grep { $_ eq $new_address } @{$message_info{refaddr $self}{'to_address'}} ) {
-			push @{$message_info{refaddr $self}{'to_address'}}, ($new_address);
-		}
-	}
-	# If we are given an array of address, merge it with our current array.
-	elsif ( reftype($new_address) eq 'ARRAY' ) {
-		my %temp_hash;
-		foreach my $address (@{$message_info{refaddr $self}{'to_address'}}, @{$new_address}) {
-			$temp_hash{$address} = 1;
-		}
-		@{$message_info{refaddr $self}{'to_address'}} = keys %temp_hash;
-	}
-	return;
-}
-
 =head3 remove_to_address
 
 Removes a single to address from the array.
 
 =cut
-
-sub remove_to_address {
-	my ($self, $address) = @_;
-	@{$message_info{refaddr $self}{'to_address'}}
-		= grep { $_ ne $address } @{$message_info{refaddr $self}{'to_address'}};
-	return;
-}
 
 #
 # Getters.
@@ -375,13 +487,6 @@ sub remove_to_address {
 Gets the from address.  (Either as set using the setter, or as found in the
 log.)
 
-=cut
-
-sub get_from_address {
-	my ($self) = @_;
-	return $message_info{refaddr $self}{'from_address'};
-}
-
 =head3 get_to_address
 
 Gets the to address array.  (Either as set using the setters, or as found in the
@@ -390,72 +495,30 @@ log.)
 Will return a reference to an array, or 'undef' if the to address has not been
 set/found.
 
-=cut
-
-sub get_to_address {
-	my ($self) = @_;
-	return $message_info{refaddr $self}{'to_address'};
-}
-
 =head3 get_message_id
 
 Gets the message_id.  (Either as set using the setter, or as found in the
 log.)
-
-=cut
-
-sub get_message_id {
-	my ($self) = @_;
-	return $message_info{refaddr $self}{'message_id'};
-}
 
 =head3 get_subject
 
 Gets the message subject.  (Either as set using the setter, or as found in the
 log.)
 
-=cut
-
-sub get_subject {
-	my ($self) = @_;
-	return $message_info{refaddr $self}{subject};
-}
-
 =head3 get_recieved_time
 
 Gets the recieved time.  (Either as set using the setter, or as found in the
 log.)
-
-=cut
-
-sub get_recieved_time {
-	my ($self) = @_;
-	return $message_info{refaddr $self}{'recieved_time'};
-}
 
 =head3 get_sent_time
 
 Gets the sent time.  (Either as set using the setter, or as found in the
 log.)
 
-=cut
-
-sub get_sent_time {
-	my ($self) = @_;
-	return $message_info{refaddr $self}{'sent_time'};
-}
-
 =head3 get_relay_host
 
 Gets the relay host.  (Either as set using the setter, or as found in the
 log.)
-
-=cut
-
-sub get_relay_host {
-	my ($self) = @_;
-	return $message_info{refaddr $self}{'relay'};
-}
 
 =head3 get_log
 
@@ -465,42 +528,21 @@ Returns the path to the logfile we are reading.
 
 sub get_log {
 	my ($self) = @_;
-	return  $log_info{refaddr $self}{'filename'};
+	return  $log_info{$$self}{'filename'};
 }
 
 =head3 get_connect_time
 
 Returns the time the remote host connected to this host to send the message.
 
-=cut
-
-sub get_connect_time {
-	my ($self) = @_;
-	return $log_info{refaddr $self}{'connect_time'};
-}
-
 =head3 get_disconnect_time
 
 Returns the time the remote host disconnected from this host after sending
 the message.
 
-=cut
-
-sub get_disconnect_time {
-	my ($self) = @_;
-	return $log_info{refaddr $self}{'disconnect_time'};
-}
-
 =head3 get_delay
 
 Returns the total delay in this stage in processing the message.
-
-=cut
-
-sub get_delay {
-	my ($self) = @_;
-	return $message_info{refaddr $self}{delay};
-}
 
 =head3 get_all_info
 
@@ -514,7 +556,7 @@ needed under certain circumstances.)
 
 sub get_all_info {
 	my ($self) = @_;
-	return $message_raw_info{refaddr $self};
+	return $message_raw_info{$$self};
 }
 
 #
@@ -533,17 +575,11 @@ Use to start searching for a new message.
 
 sub clear_message_info {
 	my ($self) = @_;
-	
-	$self->set_from_address(undef);
-	$self->set_message_id(undef);
-	$self->set_recieved_time(undef);
-	$self->set_sent_time(undef);
-	$self->set_relay_host(undef);
-	$self->set_to_address(undef);
-	$self->set_subject(undef);
-	$self->_set_connect_time(undef);
-	$self->_set_disconnect_time(undef);
-	$self->_set_delay(undef);
+
+	foreach my $parameter ( @cleared_parameters ) {
+		$all_setters{$$self}{$parameter}->($self, undef) if defined($all_setters{$$self}{$parameter});
+	}
+
 	$self->_set_message_raw_info(undef);
 
 	return;
@@ -589,44 +625,26 @@ sub find_message_info {
 # Private functions/methods.
 #
 
-sub _set_connect_time {
-	my ($self, $new_time) = @_;
-	$log_info{refaddr $self}->{connect_time} = $new_time;
-	return;
-}
-
-sub _set_disconnect_time {
-	my ($self, $new_time) = @_;
-	$log_info{refaddr $self}->{disconnect_time} = $new_time;
-	return;
-}
-
-sub _set_delay {
-	my ($self, $new_delay) = @_;
-	$message_info{refaddr $self}->{delay} = $new_delay;
-	return;
-}
-
 sub _set_message_raw_info {
 	my ($self, $new_hash) = @_;
-	$message_raw_info{refaddr $self} = $new_hash;
+	$message_raw_info{$$self} = $new_hash;
 	return;
 }
 
 sub _set_log_parser {
 	my ($self, $log_parser) = @_;
-	$log_info{refaddr $self}->{log_parser} = $log_parser;
+	$log_info{$$self}->{log_parser} = $log_parser;
 	return;
 }
 
 sub _get_log_parser {
 	my ($self) = @_;
-	return $log_info{refaddr $self}->{log_parser};
+	return $log_info{$$self}->{log_parser};
 }
 
 sub _get_parser_class {
 	my ($self) = @_;
-	return $log_info{refaddr $self}->{parser_class};
+	return $log_info{$$self}->{parser_class};
 }
 
 #
@@ -634,42 +652,33 @@ sub _get_parser_class {
 # (If needed.)
 #
 
+sub _requested_public_accessors { return (); };
+sub _requested_public_set_only { return (); };
+sub _requested_public_get_only { return (); };
+sub _requested_array_accessors { return (); };
+sub _requested_cleared_parameters { return (); };
+sub _requested_special_accessors { return (); };
+sub _set_as_message_info { return (); };
+
 sub _parse_args {
 	my ($self, $argref, $throw_error) = @_;
 	
 	# It is possible for them to pass the message info here.
-	$self->set_from_address($argref->{'from_address'})		if exists $argref->{'from_address'};
-	$self->set_to_address($argref->{'to_address'})			if exists $argref->{'to_address'};
-	$self->set_message_id($argref->{'message_id'})			if exists $argref->{'message_id'};
-	$self->set_relay_host($argref->{'relay_host'})			if exists $argref->{'relay_host'};
-	$self->set_sent_time($argref->{'sent_time'})			if exists $argref->{'sent_time'};
-	$self->set_recieved_time($argref->{'recieved_time'})	if exists $argref->{'recieved_time'};
-	$self->set_subject($argref->{subject})					if exists $argref->{subject};
-	
-	# And log info...
-	$self->set_parser_class($argref->{parser_class})		if exists $argref->{parser_class};
-
-	if ( exists $argref->{'to_address'} ) {
-		no warnings qw(uninitialized);
-		if ( reftype($argref->{'to_address'}) eq 'ARRAY' ) {
-			$self->set_to_address();
-			map { $self->add_to_address($_) } @{$argref->{'to_address'}};
-		}
-		else {
-			$self->set_to_address($argref->{'to_address'});
-		}
-	}
-
-	# Speed things up a bit, and make it easier to read.
 	my %args;
-	$args{from_address}	= $self->get_from_address();
-	$args{to_address}	= $self->get_to_address();
-	$args{message_id}	= $self->get_message_id();
-	$args{relay}		= $self->get_relay_host();
-	$args{sent_time}	= $self->get_sent_time();
-	$args{recieved_time}= $self->get_recieved_time();
-	$args{subject}		= $self->get_subject();
+	foreach my $parameter ( @valid_parameters ) {
+		$all_setters{$$self}{$parameter}->($self, $argref->{$parameter}) if exists $argref->{$parameter};
+	}
+	
+	# Not all parameters are checked...
+	foreach my $parameter ( @checked_parameters ) {
+		$args{$parameter} = $all_getters{$$self}{$parameter}->($self) if defined($all_setters{$$self}{$parameter});
+	}
 	$args{from_start}	= $argref->{from_start} ? 1 : 0;
+	
+	# And log info.
+	$self->set_parser_class($argref->{parser_class})		if exists $argref->{parser_class};
+	
+	# Speed things up a bit, and make it easier to read.
 	
 	if ($throw_error) {
 		# If none are defined...
