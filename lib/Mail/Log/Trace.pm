@@ -62,7 +62,7 @@ use base qw(Exporter);
 BEGIN {
     use Exporter ();
     use vars qw($VERSION @EXPORT @EXPORT_OK %EXPORT_TAGS);
-    $VERSION     = '1.0100_1';
+    $VERSION     = '1.0100';
     #Give a hoot don't pollute, do not export more than needed by default
     @EXPORT      = qw();
     @EXPORT_OK   = qw();
@@ -124,12 +124,12 @@ use overload (
 	qw{""} => sub { my ($self) = @_;
 					return  blessed($self)
 							.' File: '
-							.$log_info{$$self}{'filename'};
+							.$log_info{$$self}{filename};
 					},
 	
 	# Boolean overloads to if we are usable.  (Have a filehandle.)
 	qw{bool} => sub { my ($self) = @_;
-						return defined($log_info{$$self}{'log_parser'});
+						return defined($log_info{$$self}{log_parser});
 					},
 	
 	# Numeric context just doesn't mean anything.  Throw an error.
@@ -147,12 +147,13 @@ The base constructor for the Mail::Log::Trace classes.  It takes inital values
 for the following in a hash: C<from_address>, C<to_address>, C<message_id>,
 C<log_file>.  The only required value is the path to the logfile.
 
-    use Mail::Log::Trace;
-    my $object = Mail::Log::Trace->new({  from_address => 'from@example.com',
-                                          to_address   => 'to@example.com',
-                                          message_id   => 'messg.id.string',
-                                          log_file     => 'path/to/log',
-                                        });
+  use Mail::Log::Trace;
+  my $object = Mail::Log::Trace->new({ from_address => 'from@example.com',
+                                       to_address   => 'to@example.com',
+                                       message_id   => 'messg.id.string',
+                                       log_file     => 'path/to/log',
+                                       ...
+                                      });
 
 =cut
 
@@ -219,7 +220,7 @@ sub new
 	$self->_parse_args($parameters_ref, 0);
 
 	# Log info.
-	$self->set_log($parameters_ref->{'log_file'});  # Better to keep validation together.
+	$self->set_log($parameters_ref->{log_file});  # Better to keep validation together.
 
     return $self;
 }
@@ -621,31 +622,90 @@ sub find_message_info {
 #	return 0;	# Return false: The message couldn't be found.  This will never be called.
 }
 
-#
-# Private functions/methods.
-#
+=head1 SUBCLASSING
 
-sub _set_message_raw_info {
-	my ($self, $new_hash) = @_;
-	$message_raw_info{$$self} = $new_hash;
-	return;
-}
+There are two ways to subclass Mail::Log::Trace: The standard way, and the
+automatic way.  The old way is fairly straightforward: You create the accessors
+for all the subclass-specific information, and overide C<find_message>,
+C<find_message_info>, and C<_parse_args>. (Making sure for C<_parse_args> that
+you call the SUPER version.)
 
-sub _set_log_parser {
-	my ($self, $log_parser) = @_;
-	$log_info{$$self}->{log_parser} = $log_parser;
-	return;
-}
+Or you can try to let Mail::Log::Trace do as much of that as possible, and only
+do C<find_message> and C<find_message_info>.
 
-sub _get_log_parser {
-	my ($self) = @_;
-	return $log_info{$$self}->{log_parser};
-}
+To do the latter, you need to override several of the following list of methods:
 
-sub _get_parser_class {
-	my ($self) = @_;
-	return $log_info{$$self}->{parser_class};
-}
+  _requested_public_accessors
+  _requested_public_set_only
+  _requested_public_get_only
+  _requested_array_accessors
+  _requested_special_accessors
+  _requested_cleared_parameters
+  _set_as_message_info
+
+That looks like a long list, but it is very rare that you'll need to override
+all of them, and all they need to do is return a static list of keys that you
+want the relevant action taken on.
+
+The first five build accessors for you, of the form  C<get_$key>, C<set_$key>
+for standard public, C<_get_$key> and C<_set_key> for private accessors (note
+that if you request a private setter, you'll also get a I<public> getter, and
+vice-versa), and C<get_$key>, C<set_$key>, C<add_$key> and C<remove_$key> for
+keys which store arrays.  All of these have been heavily optimised for speed.
+
+The last two set what keys are cleared when you call C<clear_message_info> and
+what keys will be checked when C<_parse_args> is called.  (If none of those are
+present, an exception will be thrown, saying there is no message-specific data.)
+
+C<_requested_special_accessors> requires a little more discussion.  Unlike the
+rest, it expects not an array, but a hash (not a hashref: a hash).  The keys of
+the hash are the keys that will have accessors built for them (public, single,
+only), and the values are code references to parsing/validation functions.
+
+An example:
+
+  sub _requested_special_accessors { 
+      return ( year => sub {  my ($self, $year) = @_;
+                              return '____INVALID__VALUE____' if $year < 1970;
+                              my $maillog = $self->_get_log_parser();
+                              if (defined($maillog)) {
+                                  $maillog->set_year($year);
+                              }
+                              return $year;
+                           },
+              );
+  };
+
+The above is from L<Mail::Log::Trace::Postfix>, and is for the key 'year'.
+The coderef in this case does both validation and some extra action.  The action
+is to call C<$self->_get_log_parser()->set_year()> on the year being passed.
+(Because in this case the parser needs to have the year to return info
+correctly.)  The validation is to check to make sure the year is greater than
+1970. (The birth of UNIX, so we are unlikey to handle any logs earlier than
+that.)  If it is not, the special value C<____INVALID__VALUE____> is returned.
+This will cause an exception to be thrown.  If the value is valid, it is
+returned.
+
+The purpose of all the above is to allow subclasses to check values, do any
+parsing that is needed, and to any other actions that may be needed.  (This is
+in contrast to the normal accessors, which just store the value given blindly.)
+
+Note that C<undef> should always be considered a valid value.
+
+Normally keys should be in the 'public_accessors' list: those accessors are much
+faster.
+
+These accessors are built at I<run time>, when the object is first created.
+This means object creation is fairly expensive.
+
+Of course, you still need to write C<find_message> and C<find_message_info>...
+
+Mail::Log::Trace is a cached inside-out object.  If you don't know what that
+means, you can probably ignore it.  However if you need to store object state
+data (and aren't using the convience accessors), it may be useful to know that
+C<$$self == refaddr $self>.
+
+=cut
 
 #
 # Private to be implemented by the sub-classes...
@@ -690,9 +750,71 @@ sub _parse_args {
 	return \%args;
 }
 
+#
+# Private functions/methods.
+#
+
+=head1 UTILITY SUBROUTINES
+
+B<THESE ARE ONLY FOR USE BY SUBCLASSES>
+
+There are a few subroutines especially for use by subclasses.
+
+=head2 _set_message_raw_info
+
+Give this the raw message info, in whatever format the parser gives it.  The
+user should hopefully never want it, but just in case...
+
+=cut
+
+sub _set_message_raw_info {
+	my ($self, $new_hash) = @_;
+	$message_raw_info{$$self} = $new_hash;
+	return;
+}
+
+=head2 _set_log_parser
+
+Sets the log parser.  Takes a reference to a parser object.
+
+=cut
+
+sub _set_log_parser {
+	my ($self, $log_parser) = @_;
+	$log_info{$$self}->{log_parser} = $log_parser;
+	return;
+}
+
+=head2 _get_log_parser
+
+Returns the log parser object.
+
+=cut
+
+sub _get_log_parser {
+	my ($self) = @_;
+	return $log_info{$$self}->{log_parser};
+}
+
+=head2 _get_parser_class
+
+Returns the name of the class the user wants you to use to parse the file.
+
+Please take it under advisement.
+
+=cut
+
+sub _get_parser_class {
+	my ($self) = @_;
+	return $log_info{$$self}->{parser_class};
+}
+
 =head1 BUGS
 
-None known at the moment...
+None known at the moment...  (I am nervious about the way I'm storing some of
+these coderefs.  So far I haven't run into problems, but I'm not entirely sure
+there aren't any.  If you start getting weird behaviour when using multiple
+Mail::Log::Trace subclasses at once, please tell me.)
 
 =head1 REQUIRES
 
@@ -702,14 +824,16 @@ Some subclass, and probably a L<Mail::Log::Parse> class to be useful.
 
 =head1 HISTORY
 
+1.1.0 Dec 23, 2008 - Major re-write to make subclassing easier.  Or possibly
+more confusing.
+
 1.00.03 Dec 5, 2208 - Licence clarification.
 
 1.00.02 Dec 2, 2008 - I really mean it this time.
 
 1.00.01 Dec 1, 2008 - Requirements fix, no code changes.
 
-1.00.00 Nov 28, 2008
-    - original version.
+1.00.00 Nov 28, 2008 - original version.
 
 =head1 AUTHOR
 

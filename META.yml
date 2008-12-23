@@ -1,6 +1,6 @@
 ---
 name: Mail-Log-Trace
-version: 1.0100_1
+version: 1.0100
 author:
   - 'Daniel Staal - <DStaal@usa.net>'
 abstract: Traces a message through the mailsystem.
@@ -22,7 +22,7 @@ dynamic_config: 0
 provides:
   Mail::Log::Trace:
     file: lib/Mail/Log/Trace.pm
-    version: 1.0100_1
+    version: 1.0100
   Mail::Log::Trace::Postfix:
     file: lib/Mail/Log/Trace/Postfix.pm
     version: 1.0001
