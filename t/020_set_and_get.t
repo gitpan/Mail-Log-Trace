@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 use Test::Warn;
-use Test::More tests => 123;
+use Test::More tests => 132;
 use Test::Exception;
 use Test::Deep;
 
@@ -249,19 +249,33 @@ isa_ok ($exception, 'Mail::Log::Exceptions::LogFile', 'Mail::Log::Trace::Postfix
 is($exception->message(), 'Log file t/data/log is not readable.', 'Mail::Log::Trace::Postfix non-readable logfile description');
 chmod (0644, 't/data/log');	# Make sure we set it back at the end.
 
-
 ### Postfix-specific tests. ###
 is($object->get_connection_id(), undef, 'Mail::Log::Trace::Postfix before connection ID');
 is($object->get_process_id(), undef, 'Mail::Log::Trace::Postfix before process ID.');
 is($object->get_status(), undef, 'Mail::Log::Trace::Postfix before status.');
+is($object->get_year(), undef, 'Mail::Log::Trace::Postfix before year.');
 
 $object->set_connection_id('F2345D');
 $object->set_process_id('3541');
 $object->set_status('unknown');
+lives_ok { $object->set_year(1990); } 'Set year to integer.';
 
 is($object->get_connection_id(), 'F2345D', 'Mail::Log::Trace::Postfix connection ID');
 is($object->get_process_id(),'3541', 'Mail::Log::Trace::Postfix process ID.');
 is($object->get_status(), 'unknown', 'Mail::Log::Trace::Postfix status.');
+is($object->get_year(), '1990', 'Mail::Log::Trace::Postfix integer year.');
+
+# Some alternate forms.
+lives_ok { $object->set_year('1991'); } 'Set year to string.';
+is($object->get_year(), '1991', 'Mail::Log::Trace::Postfix string year.');
+
+
+eval {$object->set_year(1969);};
+$exception = Mail::Log::Exceptions->caught();
+isa_ok( $exception, 'Mail::Log::Exceptions::InvalidParameter', 'Mail::Log::Trace::Postfix invalid year.');
+is($object->get_year(), '1991', 'Mail::Log::Trace::Postfix after exception year.');
+
+
 }
 
 # Test the Postfix constructor
@@ -293,7 +307,15 @@ is($object->get_status(), 'unknown', 'Mail::Log::Trace::Postfix status.');
 is($object->get_connect_time(), undef, 'Mail::Log::Trace::Postfix connect time.');
 is($object->get_disconnect_time(), undef, 'Mail::Log::Trace::Postfix disconnect, time.');
 is($object->get_delay(), undef, 'Mail::Log::Trace::Postfix delay.');
+is($object->get_year(), 2008, 'Mail::Log::Trace::Postfix set year.');
 # Private gets.
 is($object->_get_parser_class(), 'Mail::Log::Parse::Test', 'Mail::Log::Trace::Postfix before parser.');
-
 }
+
+# Postfix Constructor 2.
+POSTFIX_CONSTRUCTOR_BAD_YEAR: {
+my $object;
+throws_ok { $object = Mail::Log::Trace::Postfix->new({year => 1900}); }
+			'Mail::Log::Exceptions::InvalidParameter', 'Mail::Log::Trace::Postfix bad year in constructor.';
+}
+

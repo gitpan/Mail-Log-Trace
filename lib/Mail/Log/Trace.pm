@@ -62,7 +62,7 @@ use base qw(Exporter);
 BEGIN {
     use Exporter ();
     use vars qw($VERSION @EXPORT @EXPORT_OK %EXPORT_TAGS);
-    $VERSION     = '1.0100';
+    $VERSION     = '1.0101';
     #Give a hoot don't pollute, do not export more than needed by default
     @EXPORT      = qw();
     @EXPORT_OK   = qw();
@@ -244,7 +244,7 @@ sub _build_setter {
 	# Build the actual subroutine.
 	if ( defined($action) ) {
 		# If we do processing or validation, give it a chance to happen.
-		return *$sub_name = sub {
+		return *{blessed($self)."::$sub_name"} = sub {
 			use strict 'refs';
 			my ($self, $new_id) = @_;
 			
@@ -263,7 +263,7 @@ sub _build_setter {
 	}
 	else {
 		# For basic setters, use a speed-optimized version.
-		return *$sub_name = sub {
+		return *{blessed($self)."::$sub_name"} = sub {
 			$message_info{${$_[0]}}{$attribute} = $_[1];
 			return;
 		}
@@ -283,7 +283,7 @@ sub _build_getter {
 	no warnings qw(redefine);
 
 	# Build the actual subroutine. (As fast as we can make it.)
-	return *$sub_name = sub {
+	return *{blessed($self)."::$sub_name"} = sub {
 		return $message_info{${$_[0]}}{$attribute};
 	}
 }
@@ -296,10 +296,9 @@ sub _build_array_accessors {
 	my $add_name = "add_$attribute";
 	my $remove_name = "remove_$attribute";
 
-	if ( $private ) {
-		foreach my $name ( ($get_name, $set_name, $add_name, $remove_name) ) {
-			$name = "_$name";
-		}
+	foreach my $name ( ($get_name, $set_name, $add_name, $remove_name) ) {
+		$name = "_$name" if ( $private );
+		$name = blessed($self)."::$name";
 	}
 
 	no strict 'refs';
@@ -823,6 +822,9 @@ L<Scalar::Util>, L<Mail::Log::Exceptions>.
 Some subclass, and probably a L<Mail::Log::Parse> class to be useful.
 
 =head1 HISTORY
+
+1.1.1 Feb 2, 2009 - Fixed a minor issue that could cause problems with multiple
+subclass objects exisiting at the same time.
 
 1.1.0 Dec 23, 2008 - Major re-write to make subclassing easier.  Or possibly
 more confusing.
